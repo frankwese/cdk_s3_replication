@@ -1,25 +1,26 @@
-import * as s3 from 'aws-cdk-lib/aws-s3'
-import * as iam from 'aws-cdk-lib/aws-iam'
-import * as kms from 'aws-cdk-lib/aws-kms'
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import {Effect, ManagedPolicy} from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as cdk from 'aws-cdk-lib';
 
-import * as fs from 'fs'
-import * as path from 'path'
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface ArchiveProps extends cdk.StackProps {
-  prefix: string
-  replications: string[]
+  prefix: string;
+  replications: string[];
 }
 
-const templateReplicationFile = path.resolve(__dirname, '../templates/replication.yml')
-const templateReplicationData = fs.readFileSync(templateReplicationFile).toString()
+const templateReplicationFile = path.resolve(__dirname, '../templates/replication.yml');
+const templateReplicationData = fs.readFileSync(templateReplicationFile).toString();
 
 export class ArchiveStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props: ArchiveProps) {
-    super(scope, id, props)
+    super(scope, id, props);
 
-    const key = new kms.Key(this, 'Key')
-    const alias = key.addAlias('archive')
+    const key = new kms.Key(this, 'Key');
+    const alias = key.addAlias('archive');
 
     const bucket = new s3.Bucket(this, 'Bucket', {
       bucketName: `${props.prefix}-archive`,
@@ -28,9 +29,11 @@ export class ArchiveStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       bucketKeyEnabled: true,
       versioned: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN
-    })
+      //TODO: RETAIN for production
+      removalPolicy: cdk.RemovalPolicy.DESTROY
+    });
 
+    /* temporarily being permissive:
     bucket.addToResourcePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.DENY,
@@ -59,16 +62,68 @@ export class ArchiveStack extends cdk.Stack {
           new iam.AnyPrincipal()
         ]
       })
-    )
+    );
 
-    const role = new iam.Role(this, 'ReplicationRole', {
+     */
+
+    const replicationRole = new iam.Role(this, 'ReplicationRole', {
       assumedBy: new iam.ServicePrincipal('s3.amazonaws.com'),
       path: '/service-role/'
     });
 
-    const stackSet = new cdk.CfnStackSet(this, "StackSet", {
-      stackSetName: `${props.prefix}-archive-replication`,
-      permissionModel: "SELF_MANAGED",
+    const stackExecutionRole = new iam.Role(this, `StackSetExecutionRole-${props.prefix}`, {
+      assumedBy: new iam.AccountRootPrincipal(),
+      description: 'This role executes the stack set for this bucket',
+    });
+
+    const assumeExecutionRole = new iam.PolicyDocument({
+      assignSids: true,
+      statements: [new iam.PolicyStatement({
+        actions: ['sts:AssumeRole'],
+        effect: Effect.ALLOW,
+        resources: [
+          stackExecutionRole.roleArn,
+          'arn:*:iam::*:role/AWSCloudFormationStackSetExecutionRole'
+        ]
+      })
+      ]
+    });
+
+    const stackAdminRole = new iam.Role(this, `StackSetAdmin-${props.prefix}`, {
+        assumedBy: new iam.ServicePrincipal('cloudformation.amazonaws.com'),
+        description: 'This role is Admin for the stackSet',
+        inlinePolicies: {
+          'assumeRole': assumeExecutionRole
+        }
+      }
+    );
+
+    stackExecutionRole.addManagedPolicy(ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'));
+
+    /*
+    stackExecutionRole.addToPolicy(
+
+      new iam.PolicyStatement({
+        actions: [
+          'cloudformation:*',
+          's3:*',
+          'sns:*',
+          'kms:*'
+        ],
+        resources: ['*']
+      })
+    );
+
+     */
+
+    const stackSet = new cdk.CfnStackSet(this, 'StackSet', {
+      stackSetName: `${props.prefix}-archive-replication-3`,
+      permissionModel: 'SELF_MANAGED',
+      administrationRoleArn: stackAdminRole.roleArn,
+      executionRoleName: stackExecutionRole.roleName,
+      operationPreferences: {
+        regionConcurrencyType: 'PARALLEL'
+      },
       parameters: [
         {
           parameterKey: 'Prefix',
@@ -76,7 +131,7 @@ export class ArchiveStack extends cdk.Stack {
         },
         {
           parameterKey: 'ReplicationRole',
-          parameterValue: role.roleArn
+          parameterValue: replicationRole.roleArn
         }
       ],
       stackInstancesGroup: [
@@ -87,10 +142,11 @@ export class ArchiveStack extends cdk.Stack {
           },
         },
       ],
-      templateBody:templateReplicationData,
+      templateBody: templateReplicationData,
     });
 
-    role.addToPolicy(
+    stackSet.addDependsOn(stackExecutionRole.node.defaultChild as iam.CfnRole);
+    replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: [
           bucket.bucketArn
@@ -102,7 +158,7 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
-    role.addToPolicy(
+    replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: [
           bucket.arnForObjects('*')
@@ -116,7 +172,7 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
-    role.addToPolicy(
+    replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: [
           key.keyArn
@@ -127,7 +183,7 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
-    role.addToPolicy(
+    replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: props.replications.map(
           region => `arn:aws:kms:${region}:${this.account}:alias/archive/replication`
@@ -138,7 +194,7 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
-    role.addToPolicy(
+    replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: props.replications.map(
           region => `arn:aws:s3:::${props.prefix}-archive-replication-${region}/*`
@@ -151,7 +207,7 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
-    role.addToPolicy(
+    replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: props.replications.map(
           region => `arn:aws:s3:::${props.prefix}-archive-replication-${region}`
@@ -168,7 +224,7 @@ export class ArchiveStack extends cdk.Stack {
 
     // Change its properties
     cfnBucket.replicationConfiguration = {
-      role: role.roleArn,
+      role: replicationRole.roleArn,
       rules: props.replications.map(
         (region, index) => (
           {
@@ -195,10 +251,10 @@ export class ArchiveStack extends cdk.Stack {
           }
         )
       )
-    }
+    };
     cfnBucket.addDependsOn(stackSet);
-    new cdk.CfnOutput(this, 'BucketName', { value: bucket.bucketName })
-    new cdk.CfnOutput(this, 'BucketRegion', { value: this.region })
-    new cdk.CfnOutput(this, 'BucketReplications', { value: props.replications.join(', ') })
+    new cdk.CfnOutput(this, 'BucketName', {value: bucket.bucketName});
+    new cdk.CfnOutput(this, 'BucketRegion', {value: this.region});
+    new cdk.CfnOutput(this, 'BucketReplications', {value: props.replications.join(', ')});
   }
 }

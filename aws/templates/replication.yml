@@ -37,7 +37,7 @@ Resources:
 
   Bucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+#    DeletionPolicy: Retain
     Properties:
       BucketName: !Sub ${Prefix}-archive-replication-${AWS::Region}
       AccessControl: Private
