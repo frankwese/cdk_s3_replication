@@ -5,21 +5,26 @@ import * as cdk from 'aws-cdk-lib';
 
 import * as fs from 'fs';
 import * as path from 'path';
-
+//TODO: extends s3.BucketProps only have additional replicateTo
 export interface ArchiveProps extends cdk.StackProps {
   bucketName: string;
   replications: string[];
+  bucketProps: s3.BucketProps;
 }
 
 const templateReplicationFile = path.resolve(__dirname, '../templates/replication.yml');
 const templateReplicationData = fs.readFileSync(templateReplicationFile).toString();
 
+//TODO: extend Construct
 export class ArchiveStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props: ArchiveProps) {
     super(scope, id, props);
 
+    const {replications, ...cdkBucketProps} = props;
+
+//TODO: use the provided key from cdkBucketProps
     const key = new kms.Key(this, 'Key');
-    const alias = key.addAlias('archive');
+    const alias = key.addAlias(`${props.bucketName}`);
 
     const bucket = new s3.Bucket(this, 'Bucket', {
       bucketName: props.bucketName,
@@ -139,7 +144,7 @@ export class ArchiveStack extends cdk.Stack {
       },
       parameters: [
         {
-          parameterKey: 'Prefix',
+          parameterKey: 'SourceBucket',
           parameterValue: props.bucketName
         },
         {
@@ -170,7 +175,6 @@ export class ArchiveStack extends cdk.Stack {
         ]
       })
     );
-
     replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: [
@@ -185,6 +189,8 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
+    //TODO: check if this works (it is shorter)
+    key.grantDecrypt(replicationRole);
     replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: [
@@ -199,7 +205,7 @@ export class ArchiveStack extends cdk.Stack {
     replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: props.replications.map(
-          region => `arn:aws:kms:${region}:${this.account}:alias/archive/replication`
+          region => `arn:aws:kms:${region}:${this.account}:alias/${props.bucketName}/replication`
         ),
         actions: [
           'kms:Encrypt'
@@ -245,7 +251,7 @@ export class ArchiveStack extends cdk.Stack {
             destination: {
               bucket: `arn:aws:s3:::${props.bucketName}-replication-${region}`,
               encryptionConfiguration: {
-                replicaKmsKeyId: `arn:aws:kms:${region}:${this.account}:alias/archive/replication`
+                replicaKmsKeyId: `arn:aws:kms:${region}:${this.account}:alias/${props.bucketName}/replication`
               }
             },
             priority: index,
@@ -266,8 +272,6 @@ export class ArchiveStack extends cdk.Stack {
       )
     };
     cfnBucket.addDependsOn(stackSet);
-    new cdk.CfnOutput(this, 'BucketName', {value: bucket.bucketName});
-    new cdk.CfnOutput(this, 'BucketRegion', {value: this.region});
-    new cdk.CfnOutput(this, 'BucketReplications', {value: props.replications.join(', ')});
+
   }
 }

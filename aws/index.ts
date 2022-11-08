@@ -19,6 +19,7 @@ const option = {
 const app = new cdk.App()
 
 new ArchiveStack(app, 'Archive', {
+  bucketProps: {},
   stackName: `${bucketName}-archive`,
   terminationProtection: false,
   tags: {

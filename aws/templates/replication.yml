@@ -1,5 +1,5 @@
 Parameters:
-  Prefix:
+  SourceBucket:
     Type: String
   ReplicationRole:
     Type: String
@@ -32,7 +32,7 @@ Resources:
   KeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: !Sub alias/${Prefix}/replication
+      AliasName: !Sub alias/${SourceBucket}/replication
       TargetKeyId: !Ref Key
 
   Bucket:
@@ -40,7 +40,7 @@ Resources:
 #TODO: uncomment for production
 #    DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub ${Prefix}-replication-${AWS::Region}
+      BucketName: !Sub ${SourceBucket}-replication-${AWS::Region}
       AccessControl: Private
       PublicAccessBlockConfiguration:
         BlockPublicAcls: Yes
