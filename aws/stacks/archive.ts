@@ -109,15 +109,22 @@ export class ArchiveStack extends cdk.Stack {
           's3:*',
           'sns:*',
           'kms:*'
+          'iam:PassRole'
+          "iam:CreateServiceLinkedRole",
+
         ],
-        resources: ['*']
+        resources: [
+        '*',
+        "arn:aws:cloudformation:*:974281796532:stackset/wese-archive-replication:*",
+        "arn:aws:cloudformation:eu-central-1:974281796532:stack/wese-archive/*",
+        ]
       })
     );
 
      */
 
     const stackSet = new cdk.CfnStackSet(this, 'StackSet', {
-      stackSetName: `${props.prefix}-archive-replication-3`,
+      stackSetName: `${props.prefix}-archive-replication`,
       permissionModel: 'SELF_MANAGED',
       administrationRoleArn: stackAdminRole.roleArn,
       executionRoleName: stackExecutionRole.roleName,
