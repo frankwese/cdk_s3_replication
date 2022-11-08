@@ -1,6 +1,5 @@
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import {Effect, ManagedPolicy} from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as cdk from 'aws-cdk-lib';
 
@@ -8,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface ArchiveProps extends cdk.StackProps {
-  prefix: string;
+  bucketName: string;
   replications: string[];
 }
 
@@ -23,17 +22,20 @@ export class ArchiveStack extends cdk.Stack {
     const alias = key.addAlias('archive');
 
     const bucket = new s3.Bucket(this, 'Bucket', {
-      bucketName: `${props.prefix}-archive`,
+      bucketName: props.bucketName,
       encryption: s3.BucketEncryption.KMS,
       encryptionKey: alias,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       bucketKeyEnabled: true,
       versioned: true,
-      //TODO: RETAIN for production
-      removalPolicy: cdk.RemovalPolicy.DESTROY
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
     });
 
-    /* temporarily being permissive:
+    //TODO: Remove for production
+    key.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+    bucket.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+
     bucket.addToResourcePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.DENY,
@@ -64,67 +66,71 @@ export class ArchiveStack extends cdk.Stack {
       })
     );
 
-     */
 
     const replicationRole = new iam.Role(this, 'ReplicationRole', {
       assumedBy: new iam.ServicePrincipal('s3.amazonaws.com'),
       path: '/service-role/'
     });
 
-    const stackExecutionRole = new iam.Role(this, `StackSetExecutionRole-${props.prefix}`, {
+    const stackExecutionRole = new iam.Role(this, `StackSetExecutionRole-${props.bucketName}`, {
       assumedBy: new iam.AccountRootPrincipal(),
       description: 'This role executes the stack set for this bucket',
     });
 
-    const assumeExecutionRole = new iam.PolicyDocument({
-      assignSids: true,
-      statements: [new iam.PolicyStatement({
-        actions: ['sts:AssumeRole'],
-        effect: Effect.ALLOW,
-        resources: [
-          stackExecutionRole.roleArn,
-          'arn:*:iam::*:role/AWSCloudFormationStackSetExecutionRole'
-        ]
-      })
-      ]
-    });
-
-    const stackAdminRole = new iam.Role(this, `StackSetAdmin-${props.prefix}`, {
+    const stackAdminRole = new iam.Role(this, `StackSetAdmin-${props.bucketName}`, {
         assumedBy: new iam.ServicePrincipal('cloudformation.amazonaws.com'),
         description: 'This role is Admin for the stackSet',
         inlinePolicies: {
-          'assumeRole': assumeExecutionRole
+          'assumeRole': new iam.PolicyDocument({
+            assignSids: true,
+            statements: [new iam.PolicyStatement({
+              actions: ['sts:AssumeRole'],
+              effect: iam.Effect.ALLOW,
+              resources: [
+                stackExecutionRole.roleArn,
+              ]
+            })
+            ]
+          })
         }
       }
     );
 
-    stackExecutionRole.addManagedPolicy(ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'));
-
-    /*
     stackExecutionRole.addToPolicy(
-
       new iam.PolicyStatement({
+        sid: 'AllowKMS',
+        actions: ['kms:*'],
+        resources: ['*']
+      })
+    );
+    stackExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'AllowS3',
+        actions: ['s3:*'],
+        resources: [`arn:aws:s3:::${props.bucketName}-replication-*`]
+      })
+    );
+
+    stackExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'CFPermissions',
         actions: [
           'cloudformation:*',
-          's3:*',
-          'sns:*',
-          'kms:*'
-          'iam:PassRole'
+          'iam:PassRole',
           "iam:CreateServiceLinkedRole",
 
         ],
         resources: [
-        '*',
-        "arn:aws:cloudformation:*:974281796532:stackset/wese-archive-replication:*",
-        "arn:aws:cloudformation:eu-central-1:974281796532:stack/wese-archive/*",
+          `arn:aws:cloudformation:${this.region}:${this.account}:stackset/${props.bucketName}-replication:*`,
+          `arn:aws:cloudformation:*:${this.account}:stack/StackSet-${props.bucketName}-replication*`,
+          `arn:aws:cloudformation:${this.region}:${this.account}:stack/${props.bucketName}/*`,
         ]
       })
     );
 
-     */
 
     const stackSet = new cdk.CfnStackSet(this, 'StackSet', {
-      stackSetName: `${props.prefix}-archive-replication`,
+      stackSetName: `${props.bucketName}-replication`,
       permissionModel: 'SELF_MANAGED',
       administrationRoleArn: stackAdminRole.roleArn,
       executionRoleName: stackExecutionRole.roleName,
@@ -134,7 +140,7 @@ export class ArchiveStack extends cdk.Stack {
       parameters: [
         {
           parameterKey: 'Prefix',
-          parameterValue: props.prefix
+          parameterValue: props.bucketName
         },
         {
           parameterKey: 'ReplicationRole',
@@ -204,7 +210,7 @@ export class ArchiveStack extends cdk.Stack {
     replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: props.replications.map(
-          region => `arn:aws:s3:::${props.prefix}-archive-replication-${region}/*`
+          region => `arn:aws:s3:::${props.bucketName}-replication-${region}/*`
         ),
         actions: [
           's3:ReplicateDelete',
@@ -217,7 +223,7 @@ export class ArchiveStack extends cdk.Stack {
     replicationRole.addToPolicy(
       new iam.PolicyStatement({
         resources: props.replications.map(
-          region => `arn:aws:s3:::${props.prefix}-archive-replication-${region}`
+          region => `arn:aws:s3:::${props.bucketName}-replication-${region}`
         ),
         actions: [
           's3:List*',
@@ -237,7 +243,7 @@ export class ArchiveStack extends cdk.Stack {
           {
             id: region,
             destination: {
-              bucket: `arn:aws:s3:::${props.prefix}-archive-replication-${region}`,
+              bucket: `arn:aws:s3:::${props.bucketName}-replication-${region}`,
               encryptionConfiguration: {
                 replicaKmsKeyId: `arn:aws:kms:${region}:${this.account}:alias/archive/replication`
               }

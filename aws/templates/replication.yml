@@ -32,14 +32,15 @@ Resources:
   KeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: alias/archive/replication
+      AliasName: !Sub alias/${Prefix}/replication
       TargetKeyId: !Ref Key
 
   Bucket:
     Type: AWS::S3::Bucket
+#TODO: uncomment for production
 #    DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub ${Prefix}-archive-replication-${AWS::Region}
+      BucketName: !Sub ${Prefix}-replication-${AWS::Region}
       AccessControl: Private
       PublicAccessBlockConfiguration:
         BlockPublicAcls: Yes

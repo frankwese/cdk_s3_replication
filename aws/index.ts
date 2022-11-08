@@ -4,9 +4,9 @@ import * as cdk from 'aws-cdk-lib';
 
 import { ArchiveStack } from './stacks/archive'
 
-const prefix = 'wese'
+const bucketName = 'wese'
 const option = {
-  prefix,
+  bucketName,
   env: {
     region: 'eu-central-1'
   },
@@ -19,7 +19,7 @@ const option = {
 const app = new cdk.App()
 
 new ArchiveStack(app, 'Archive', {
-  stackName: `${prefix}-archive`,
+  stackName: `${bucketName}-archive`,
   terminationProtection: false,
   tags: {
     stack: 'replication',
