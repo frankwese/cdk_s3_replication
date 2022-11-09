@@ -3,7 +3,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import {Duration} from 'aws-cdk-lib';
 
-import {ReplicatedBucket} from './stacks/replicated-bucket';
+import {ReplicatedBucket} from './replicated-bucket';
 import {Key} from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import {BucketAccessControl, BucketEncryption} from 'aws-cdk-lib/aws-s3';
@@ -31,7 +31,7 @@ class ReplicateTestStack extends cdk.Stack {
     }));
 
     const replicatedBucket = new ReplicatedBucket(this, 'SourceBucket', {
-      bucketName: `locked-testbucket-${this.account}`,
+      bucketName: `testbucket-${this.account}`,
       encryption: s3.BucketEncryption.KMS,
       encryptionKey: key,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -40,6 +40,7 @@ class ReplicateTestStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
       replicateTo: ['eu-north-1', 'eu-west-1'],
+      destinationStorageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
       serverAccessLogsBucket: logBucket,
       serverAccessLogsPrefix: `S3AccessLogs/testbucket-${this.account}/`
     });

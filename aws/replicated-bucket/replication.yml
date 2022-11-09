@@ -37,8 +37,7 @@ Resources:
 
   Bucket:
     Type: AWS::S3::Bucket
-#TODO: uncomment for production
-#    DeletionPolicy: Retain
+    DeletionPolicy: Retain
     Properties:
       BucketName: !Sub ${SourceBucket}-replication-${AWS::Region}
       AccessControl: Private
